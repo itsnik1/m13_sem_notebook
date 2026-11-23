@@ -38,7 +38,7 @@ head(dat)
 There are `r nrow(dat)` observations and `r ncol(dat)` recorded variables. The proposed factors group the variables as follows.
 
 | Factor | Variables in the data |
-|---|---|
+|------------------------------------|------------------------------------|
 | Adjustment | Motivation (`motiv`), harmony (`harm`), stability (`stabi`) |
 | Risk | Verbal IQ (`verbal`), negative parental psychology (`ppsych`), socioeconomic status (`ses`) |
 | Achievement | Reading (`read`), arithmetic (`arith`), spelling (`spell`) |
@@ -57,7 +57,7 @@ cor(dat) |> round(2)
 ## Variables and Paths
 
 | Term | Example from the seminar |
-|---|---|
+|------------------------------------|------------------------------------|
 | Observed variable | Reading has a recorded score for each student. |
 | Latent variable or factor | Achievement is estimated from the relationships among the academic scores. |
 | Indicator | Spelling is one of the observed measures used for Achievement. |
@@ -79,15 +79,13 @@ In a path diagram, rectangles are observed variables and ovals are latent variab
 
 For the measurement part, one row of the matrix equation can be read as an ordinary equation:
 
-$$
-\text{reading} = \text{intercept} +
-\lambda_{\text{read}}(\text{Achievement}) + \epsilon_{\text{read}}.
-$$
+$$\text{reading} = \text{intercept} +
+\lambda_{\text{read}}(\text{Achievement}) + \epsilon_{\text{read}}.$$
 
 $\Lambda$ groups the loadings together. Each row corresponds to an indicator. The structural part is written as $\eta = \alpha + \Gamma\xi + B\eta + \zeta$.
 
 | Symbol | What I look for in the model |
-|---|---|
+|------------------------------------|------------------------------------|
 | $\xi$, $\eta$ | Exogenous and endogenous factors, respectively |
 | $\Gamma$ | Paths starting at an exogenous factor and ending at an endogenous factor |
 | $B$ | Paths between endogenous factors |
@@ -96,7 +94,7 @@ $\Lambda$ groups the loadings together. Each row corresponds to an indicator. Th
 # lavaan Syntax
 
 | Operator | Example | Meaning |
-|---|---|---|
+|------------------------|------------------------|------------------------|
 | `~` | `read ~ motiv` | Predict reading from motivation. The arrow points to reading. |
 | `=~` | `achieve =~ read + arith + spell` | Define Achievement using three indicators. The arrows point from the factor to the indicators. |
 | `~~` | `motiv ~~ harm` | Estimate a covariance. With two outcomes, this refers to their residual covariance. |
@@ -208,7 +206,7 @@ paths(fit3e)
 ```
 
 | Model | What happens to the reading and arithmetic equations? | Free parameters | df |
-|---|---|---:|---:|
+|-----------------|-----------------|------------------:|------------------:|
 | 2 | Only reading is predicted. One outcome residual variance. | 4 | 0 |
 | 3A | Reading uses both predictors. Arithmetic uses motivation. Two residual variances and a free residual covariance. | 6 | 1 |
 | 3D | Same predictors as 3A. Fixing the residual covariance to zero removes one free parameter. | 5 | 2 |
@@ -268,7 +266,7 @@ pchisq(4.870, df = 1, lower.tail = FALSE)
 ```
 
 | Measure | Model 4A | Interpretation |
-|---|---:|---|
+|----------------------|----------------------------:|----------------------|
 | Chi-square | 4.870, df = 1, p = .027 | The exact-fit test picks up a difference between the observed and implied covariance matrices. The test is sensitive to sample size. |
 | CFI | .994 | The proposed paths improve fit considerably over the baseline model. |
 | TLI | .971 | The improvement still looks good after accounting for model complexity. |
@@ -386,10 +384,10 @@ summary(fit6a, standardized = TRUE, fit.measures = TRUE, rsquare = TRUE)
 I used `Std.all` to compare the two predictors because it puts them on the same scale.
 
 | Model 6A result | Interpretation |
-|---|---|
+|------------------------------------|------------------------------------|
 | Adjustment → Achievement = .372 | At the same Risk score, a one-SD increase in Adjustment predicts a .372 SD increase in Achievement. |
 | Risk → Achievement = .564 | At the same Adjustment score, a one-SD increase in Risk predicts a .564 SD increase in Achievement. A higher Risk score here goes with higher verbal IQ and lower negative parental psychology. |
-| Adjustment ~~ Risk = .470 standardized | Students with higher Adjustment scores also tend to score higher on this version of Risk. |
+| Adjustment  Risk = .470 standardized | Students with higher Adjustment scores also tend to score higher on this version of Risk. |
 | Achievement residual variance = .347 standardized | About 35% of the variation in Achievement remains after accounting for both predictors. Together they explain about 65%. |
 
 The loadings in the first part of the output still tell me how each factor is measured. The `Regressions` section answers the research question. Both predictors have positive slopes, and Risk has the larger standardized coefficient.
@@ -563,5 +561,5 @@ UCLA Statistical Methods and Data Analytics. n.d. “Introduction to Structural 
 
 # Appendix
 
-- GH Repo
-- Published Page
+- [GH Repo](https://github.com/itsnik1/m13_sem_notebook)
+- [Published Page](https://itsnik1.github.io/m13_sem_notebook/)
