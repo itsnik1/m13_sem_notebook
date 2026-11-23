@@ -1,0 +1,567 @@
+---
+title: "Structural Equation Modeling in R: Study Note"
+author: "Nik Sahami"
+date: today
+format:
+  html:
+    toc: true
+    toc-title: "Contents"
+    toc-depth: 3
+    number-sections: true
+    smooth-scroll: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# Introduction
+
+The question in the UCLA example is whether Adjustment and Risk predict student Achievement. The data include reading, arithmetic, and spelling scores, but there isn't a column for overall Achievement. This is where the CFA material from the last assignment comes in. I can use the three scores to measure Achievement, then use Achievement as the outcome in a regression.
+
+The seminar works up to that model starting with a simpler question: How much does reading change with motivation?
+
+# Data and Software
+
+```{r}
+library(lavaan)
+
+dat <- read.csv(
+  "https://stats.oarc.ucla.edu/wp-content/uploads/2021/02/worland5.csv"
+)
+
+str(dat)
+head(dat)
+```
+
+There are `r nrow(dat)` observations and `r ncol(dat)` recorded variables. The proposed factors group the variables as follows.
+
+| Factor | Variables in the data |
+|---|---|
+| Adjustment | Motivation (`motiv`), harmony (`harm`), stability (`stabi`) |
+| Risk | Verbal IQ (`verbal`), negative parental psychology (`ppsych`), socioeconomic status (`ses`) |
+| Achievement | Reading (`read`), arithmetic (`arith`), spelling (`spell`) |
+
+```{r}
+cov(dat) |> round(2)
+cor(dat) |> round(2)
+```
+
+- **Covariance matrix:** Variances are on the diagonal. To find the covariance between reading and spelling, go to the `read` row and the `spell` column.
+- **Correlation matrix:** Same pairs of variables, now on a scale from -1 to 1. Reading and spelling have a correlation of `r round(cor(dat$read, dat$spell), 2)`. Students who scored higher on one generally scored higher on the other.
+- **Three matrices to keep straight:** $\Sigma$ is the unknown population covariance matrix. $S$ is what I calculate from the sample. $\Sigma(\theta)$ is what the model predicts from its loadings, slopes, and variances. The last two are the ones I can actually compare.
+
+# SEM Concepts
+
+## Variables and Paths
+
+| Term | Example from the seminar |
+|---|---|
+| Observed variable | Reading has a recorded score for each student. |
+| Latent variable or factor | Achievement is estimated from the relationships among the academic scores. |
+| Indicator | Spelling is one of the observed measures used for Achievement. |
+| Loading | How much the expected spelling score changes for a one-unit increase in Achievement. |
+| Exogenous variable | A predictor with no regression arrow pointing into it. Risk is exogenous in Model 6B. |
+| Endogenous variable | A variable predicted within the model. Adjustment is endogenous once I write `adjust ~ risk`. |
+| Regression path | An arrow from a predictor to an outcome, such as motivation → reading. |
+| Intercept | Predicted reading when the predictors in the reading equation equal zero. |
+| Residual | The difference between a student's observed and predicted score. Residual variance tells me how much variation remains across students. |
+| Covariance | How two variables vary together. A positive covariance means above-average values on one tend to occur with above-average values on the other. |
+
+## Measurement and Structural Models
+
+The **measurement model** answers “What measures Achievement?” The **structural model** answers “What predicts Achievement?” Reading has a different role in each part of the seminar. Early on, it is an outcome predicted by motivation. Later, it is an indicator of a broader academic factor.
+
+In a path diagram, rectangles are observed variables and ovals are latent variables. A one-headed arrow points toward the variable being predicted or measured. A two-headed arrow between variables represents a covariance. A loop back to the same variable represents a variance.
+
+## Matrix Notation
+
+For the measurement part, one row of the matrix equation can be read as an ordinary equation:
+
+$$
+\text{reading} = \text{intercept} +
+\lambda_{\text{read}}(\text{Achievement}) + \epsilon_{\text{read}}.
+$$
+
+$\Lambda$ groups the loadings together. Each row corresponds to an indicator. The structural part is written as $\eta = \alpha + \Gamma\xi + B\eta + \zeta$.
+
+| Symbol | What I look for in the model |
+|---|---|
+| $\xi$, $\eta$ | Exogenous and endogenous factors, respectively |
+| $\Gamma$ | Paths starting at an exogenous factor and ending at an endogenous factor |
+| $B$ | Paths between endogenous factors |
+| $\alpha$, $\zeta$ | Intercepts and unexplained parts of the structural equations |
+
+# lavaan Syntax
+
+| Operator | Example | Meaning |
+|---|---|---|
+| `~` | `read ~ motiv` | Predict reading from motivation. The arrow points to reading. |
+| `=~` | `achieve =~ read + arith + spell` | Define Achievement using three indicators. The arrows point from the factor to the indicators. |
+| `~~` | `motiv ~~ harm` | Estimate a covariance. With two outcomes, this refers to their residual covariance. |
+| `~~` | `motiv ~~ motiv` | Same variable on both sides gives a variance. |
+| `~ 1` | `read ~ 1` | Include an intercept for reading. |
+| `1*` | `achieve =~ 1*read` | Fix the reading loading at 1. This sets the units for Achievement. |
+| `NA*` | `achieve =~ NA*read` | Free the first loading. If I do this, the factor needs another scale constraint, such as fixing its variance at 1. |
+| `a*` | `adjust ~ a*risk` | Give the coefficient a name. I can use `a` later to calculate an indirect effect. |
+
+# Regression and Path Analysis
+
+## Model 1: Simple Regression
+
+```{r}
+# Same research question using lm() and lavaan
+fit1a <- lm(read ~ motiv, data = dat)
+summary(fit1a)
+
+m1b <- '
+  read ~ 1 + motiv
+  motiv ~~ motiv
+'
+
+fit1b <- sem(m1b, data = dat)
+summary(fit1b)
+```
+
+For each additional point in motivation, predicted reading increases by `r round(unname(coef(fit1a)[2]), 3)` points. The intercept is `r round(unname(coef(fit1a)[1]), 2)`, which is the predicted reading score at zero motivation. I get the same slope and intercept with either function. Where the output differs is the variance estimate.
+
+```{r}
+n <- nobs(fit1a)
+
+c(
+  motivation_mean = mean(dat$motiv),
+  motivation_sample_variance = var(dat$motiv),
+  motivation_ML_variance = var(dat$motiv) * (n - 1) / n,
+  reading_residual_variance_lm = sigma(fit1a)^2,
+  reading_residual_variance_ML = sum(resid(fit1a)^2) / n
+) |> round(3)
+```
+
+- `motiv ~~ motiv` gives the variance of motivation itself. `.read` in the variance output is the reading variance left over after using motivation to predict it.
+- `lm()` uses least squares to fit the line. Its residual variance estimate divides the sum of squared residuals by $n-2$ because the line has an intercept and a slope. Normal-theory maximum likelihood gives the same line here and divides by $n$ for the residual variance.
+- **Why 0 df in `lavaan`?** Two means, two variances, and one covariance give five pieces of information. The model estimates five parameters: motivation's mean and variance, plus the reading intercept, slope, and residual variance. The 498 residual df in `lm()` come from counting students minus fitted coefficients. That's a different calculation.
+
+## Model 2: Multiple Regression
+
+```{r}
+m2 <- '
+  read ~ 1 + ppsych + motiv
+'
+
+fit2 <- sem(m2, data = dat)
+summary(fit2)
+```
+
+There is still one outcome, reading. Adding `ppsych` changes what the motivation slope means. It now compares students with the same value of negative parental psychology. Likewise, the `ppsych` slope gives the expected difference in reading at the same motivation score.
+
+The four free parameters are the two slopes, the reading intercept, and the reading residual variance. By default, `lavaan` takes the observed predictors' means, variances, and covariance from the sample.
+
+## Model 3: Multivariate Regression
+
+```{r}
+# 3A: reading and arithmetic are both outcomes
+m3a <- '
+  read  ~ ppsych + motiv
+  arith ~ motiv
+'
+
+fit3a <- sem(m3a, data = dat)
+
+# Separate regressions for comparison
+fit3b <- lm(read ~ ppsych + motiv, data = dat)
+fit3c <- lm(arith ~ motiv, data = dat)
+
+# 3D: no residual covariance between the two outcomes
+m3d <- '
+  read  ~ ppsych + motiv
+  arith ~ motiv
+  read ~~ 0*arith
+'
+
+fit3d <- sem(m3d, data = dat)
+
+# 3E: both predictors enter both equations
+m3e <- '
+  read  ~ ppsych + motiv
+  arith ~ ppsych + motiv
+  ppsych ~~ motiv
+  ppsych ~~ ppsych
+  motiv  ~~ motiv
+'
+
+fit3e <- sem(m3e, data = dat)
+```
+
+```{r}
+# Keep the parameter name next to the estimate when comparing models
+paths <- function(fit) {
+  parameterEstimates(fit, standardized = TRUE) |>
+    subset(op %in% c("~", "~~"), select = c(lhs, op, rhs, est, std.all))
+}
+
+paths(fit3a)
+paths(fit3d)
+coef(fit3b)
+coef(fit3c)
+paths(fit3e)
+```
+
+| Model | What happens to the reading and arithmetic equations? | Free parameters | df |
+|---|---|---:|---:|
+| 2 | Only reading is predicted. One outcome residual variance. | 4 | 0 |
+| 3A | Reading uses both predictors. Arithmetic uses motivation. Two residual variances and a free residual covariance. | 6 | 1 |
+| 3D | Same predictors as 3A. Fixing the residual covariance to zero removes one free parameter. | 5 | 2 |
+| 3E | Both outcomes use both predictors. The model also estimates the two predictor variances and their covariance. | 10 | 0 |
+
+```{r}
+# Check the counts against the fitted models
+sapply(
+  list(M2 = fit2, M3A = fit3a, M3D = fit3d, M3E = fit3e),
+  fitMeasures,
+  fit.measures = c("npar", "df")
+)
+```
+
+In 3A, the `read ~~ arith` estimate tells me whether students who score above their predicted reading score also tend to score above their predicted arithmetic score. This is different from looking up `read` and `arith` in `cov(dat)`, which uses the original scores. Fixing this residual covariance to zero in 3D gives the same slopes as running the two regressions separately.
+
+In 3E there are four observed variables, so the covariance matrix has four variances and six unique covariances. All ten can be reproduced. This is the saturated version of the model.
+
+## Model 4: Path Analysis
+
+```{r}
+m4a <- '
+  read  ~ ppsych + motiv
+  arith ~ motiv + read
+'
+
+fit4a <- sem(m4a, data = dat)
+paths(fit4a)
+```
+
+```{mermaid}
+flowchart TD
+  P["Negative parental psychology"] --> R["Reading"]
+  M["Motivation"] --> R
+  M --> A["Arithmetic"]
+  R --> A
+```
+
+The diagram shows the four regression paths. `ppsych` and `motiv` each predict reading, holding the other predictor constant. Motivation also predicts arithmetic directly. The reading → arithmetic arrow gives the expected difference in arithmetic for a one-point difference in reading at the same level of motivation.
+
+Reading is on the left side of the first equation and the right side of the second. That gives motivation a second route to arithmetic through reading. The two starting predictors can covary even though neither is modeled as an outcome.
+
+# Model-Fit Statistics
+
+```{r}
+# Use the same fit measures throughout the notes
+fit_stats <- function(fit) {
+  fitMeasures(
+    fit,
+    c("chisq", "df", "pvalue", "cfi", "tli", "rmsea",
+      "rmsea.ci.lower", "rmsea.ci.upper", "srmr")
+  ) |> round(3)
+}
+
+fit_stats(fit4a)
+pchisq(4.870, df = 1, lower.tail = FALSE)
+```
+
+| Measure | Model 4A | Interpretation |
+|---|---:|---|
+| Chi-square | 4.870, df = 1, p = .027 | The exact-fit test picks up a difference between the observed and implied covariance matrices. The test is sensitive to sample size. |
+| CFI | .994 | The proposed paths improve fit considerably over the baseline model. |
+| TLI | .971 | The improvement still looks good after accounting for model complexity. |
+| RMSEA | .088 | Less encouraging than CFI and TLI. The interval in the output is fairly wide with only one df. |
+
+My read on 4A is that the paths capture much of the relationship among the scores, but the restriction we placed on the model costs some fit. The CFI alone would make that easy to miss.
+
+## Baseline Model
+
+```{r}
+m4c <- '
+  read   ~~ read
+  ppsych ~~ ppsych
+  motiv  ~~ motiv
+  arith  ~~ arith
+'
+
+fit4c <- sem(m4c, data = dat)
+
+fitMeasures(fit4c, c("chisq", "df"))
+fitMeasures(fit4a, c("baseline.chisq", "baseline.df"))
+```
+
+These two baseline results differ for a reason. In 4C all six pairwise covariances are fixed at zero. The baseline that `lavaan` uses for 4A keeps the covariance between `ppsych` and `motiv` because they're fixed exogenous predictors. That baseline has five df and is the one used in 4A's CFI and TLI.
+
+## Identification
+
+- **Fixed parameter:** Its value is set in advance. For example, `0*arith` in Model 3D fixes a residual covariance at zero.
+- **Free parameter:** R estimates the value from the data.
+- **Saturated:** All observed moments can be reproduced. Model 3E is an example.
+- **Just-identified:** The parameters have a unique solution and there are zero df left to test the model.
+- **Over-identified:** The model is identified and has restrictions that can be tested. Model 4A has one df.
+- **Under-identified:** More than one set of parameter values can give the same implied moments. Negative df are enough to flag a problem. Positive or zero df alone don't guarantee a unique solution.
+
+# Modification Indices
+
+```{r}
+modindices(fit4a, sort = TRUE) |> head(6)
+
+m4b <- '
+  read  ~ ppsych + motiv
+  arith ~ motiv + read + ppsych
+'
+
+fit4b <- sem(m4b, data = dat)
+rbind(original = fit_stats(fit4a), revised = fit_stats(fit4b))
+```
+
+`mi` gives the approximate drop in chi-square from freeing one parameter. Each row considers one restriction, which is why the index has one df. `epc` gives the expected change in the parameter itself. For `arith ~ ppsych`, the MI is about 4.85 and the EPC is .068. One number is about fit and the other is about the size of the slope.
+
+The largest MI in the seminar output suggests `motiv ~ arith`. That would have arithmetic predicting motivation when motivation already predicts arithmetic. I'd need a reason to expect that feedback before adding it. Model 4B makes the smaller change of letting parental psychology predict arithmetic directly. It also uses up the last df, so perfect fit at that point tells me very little about whether the added path would hold up in another sample.
+
+# Measurement Model
+
+## Model 5A: Risk
+
+```{r}
+m5a <- '
+  risk =~ verbal + ses + ppsych
+  verbal ~ 1
+  ses    ~ 1
+  ppsych ~ 1
+'
+
+fit5a <- cfa(m5a, data = dat)
+summary(fit5a, standardized = TRUE)
+```
+
+I kept `verbal` first to match the seminar code. Its loading is fixed at 1. Higher verbal IQ and higher SES go with a higher factor score, while higher negative parental psychology goes with a lower factor score. Despite the name *Risk*, higher values here describe a more favorable profile. This matters later when the Risk coefficient comes out positive.
+
+The three `~ 1` lines estimate the indicator intercepts. With one factor and three indicators, this example has zero df. I can interpret the loadings, but its fit doesn't give me a test of the one-factor structure.
+
+## Three-Factor CFA
+
+```{r}
+measurement_model <- '
+  adjust  =~ motiv + harm + stabi
+  risk    =~ verbal + ppsych + ses
+  achieve =~ read + arith + spell
+'
+
+fit_measurement <- cfa(measurement_model, data = dat)
+
+standardizedSolution(fit_measurement) |>
+  subset(op == "=~", select = c(lhs, rhs, est.std, pvalue))
+
+lavInspect(fit_measurement, "rsquare") |> round(3)
+fit_stats(fit_measurement)
+```
+
+- **Adjustment:** Motivation, harmony, and stability all load positively. Motivation has the strongest relationship with the factor, followed by harmony and then stability.
+- **Risk:** Verbal IQ and SES load positively. Negative parental psychology loads negatively. The sign depends on how the factor was scaled.
+- **Achievement:** The standardized loadings are about .94 for reading, .79 for arithmetic, and .92 for spelling. A student one SD higher in Achievement is expected to score about .79 SD higher in arithmetic.
+
+For reading, $.94^2$ is about .89. Achievement accounts for roughly 89% of the variation in reading, leaving about 11% as residual variance. The same calculation for arithmetic gives about 62%, so more of the differences in arithmetic scores are left unexplained.
+
+The full CFA has enough df to check fit. CFI is about .95 and TLI is .93, but RMSEA is about .10 and the chi-square test is significant. The indicators generally relate to their factors as expected. The fit results are more mixed when all nine measures are considered together.
+
+# Structural Regression Model
+
+## Model 6A: Predicting Achievement
+
+```{r}
+# Keep the CFA loadings and add a regression for Achievement
+m6a <- paste(
+  measurement_model,
+  "achieve ~ adjust + risk",
+  sep = "\n"
+)
+
+fit6a <- sem(m6a, data = dat)
+summary(fit6a, standardized = TRUE, fit.measures = TRUE, rsquare = TRUE)
+```
+
+I used `Std.all` to compare the two predictors because it puts them on the same scale.
+
+| Model 6A result | Interpretation |
+|---|---|
+| Adjustment → Achievement = .372 | At the same Risk score, a one-SD increase in Adjustment predicts a .372 SD increase in Achievement. |
+| Risk → Achievement = .564 | At the same Adjustment score, a one-SD increase in Risk predicts a .564 SD increase in Achievement. A higher Risk score here goes with higher verbal IQ and lower negative parental psychology. |
+| Adjustment ~~ Risk = .470 standardized | Students with higher Adjustment scores also tend to score higher on this version of Risk. |
+| Achievement residual variance = .347 standardized | About 35% of the variation in Achievement remains after accounting for both predictors. Together they explain about 65%. |
+
+The loadings in the first part of the output still tell me how each factor is measured. The `Regressions` section answers the research question. Both predictors have positive slopes, and Risk has the larger standardized coefficient.
+
+Fit is the same as in the three-factor CFA. In the CFA, all three factors can correlate. In 6A, the two predictors can correlate and both have a path to Achievement. This rearranges how the three factor relationships are written without adding a restriction that would distinguish the models.
+
+## Model 6B: Risk, Adjustment, and Achievement
+
+```{r}
+m6b <- paste(
+  measurement_model,
+  '
+    adjust  ~ a*risk
+    achieve ~ b*adjust + direct*risk
+
+    indirect := a*b
+    total := direct + a*b
+  ',
+  sep = "\n"
+)
+
+fit6b <- sem(m6b, data = dat)
+
+parameterEstimates(fit6b, standardized = TRUE, ci = TRUE) |>
+  subset(
+    op %in% c("~", ":="),
+    select = c(lhs, op, rhs, est, ci.lower, ci.upper, std.all)
+  )
+
+rbind(Model_6A = fit_stats(fit6a), Model_6B = fit_stats(fit6b))
+```
+
+```{mermaid}
+flowchart TD
+  R(["Risk"]) -->|a| A(["Adjustment"])
+  A -->|b| Y(["Achievement"])
+  R -->|direct| Y
+```
+
+Adjustment now has two roles. Risk predicts it, and it predicts Achievement. The two arrows leaving Risk belong to $\Gamma$. The Adjustment → Achievement arrow belongs to $B$ because both ends of that path are endogenous.
+
+Using standardized estimates, the indirect path is about $.470 \times .372 = .175$. Adding the direct path gives a total of about $.564 + .175 = .739$. In the R output, `ci.lower` and `ci.upper` go with the **unstandardized** estimate in `est`.
+
+Model 6B fits just as well as 6A. Writing `adjust ~ risk` lets me estimate the indirect relationship, but the fit comparison can't tell me whether Risk actually comes before Adjustment.
+
+## Model 6C: Using Reading as the Outcome
+
+```{r}
+m6c <- '
+  adjust =~ motiv + harm + stabi
+  risk   =~ verbal + ses + ppsych
+  adjust ~ risk
+  read   ~ adjust + risk
+'
+
+fit6c <- sem(m6c, data = dat)
+
+standardizedSolution(fit6c) |>
+  subset(op == "~", select = c(lhs, rhs, est.std, pvalue))
+
+fit_stats(fit6c)
+```
+
+This version predicts the observed reading score. Spelling and arithmetic are no longer part of the outcome, so I'd interpret these slopes as differences in reading specifically. The seminar also shows how to write the same model with `readf =~ 1*read` and `read ~~ 0*read`. A loading of 1 and an indicator residual of 0 make `readf` equal to the observed score for this calculation.
+
+# Practice Questions and Answers
+
+**1. What is structural equation modeling?**
+
+SEM fits a set of equations together. In this example, I can estimate how well three scores measure Achievement at the same time as I estimate what predicts Achievement.
+
+**2. Which statistical models can be treated as special cases of SEM?**
+
+Simple regression, multiple regression, multivariate regression, path analysis, CFA, and structural regression can all be written as SEMs.
+
+**3. What is the difference between an observed variable and a latent variable?**
+
+I can look up a student's spelling score in the data. I can't look up their Achievement score there because Achievement is a factor estimated from reading, arithmetic, and spelling.
+
+**4. What is the difference between an exogenous variable and an endogenous variable?**
+
+An exogenous variable has no incoming regression arrow. An endogenous variable does. For example, adding `adjust ~ risk` makes Adjustment endogenous in Model 6B.
+
+**5. What is the difference between a measurement model and a structural model?**
+
+The measurement model specifies which scores belong to each factor. The structural model specifies which variables predict each other. `achieve =~ read + arith + spell` is measurement, while `achieve ~ adjust + risk` is structural.
+
+**6. What does the `~` operator mean in `lavaan`?**
+
+It specifies a regression. I read `arith ~ motiv + read` as “predict arithmetic using motivation and reading.”
+
+**7. What does the `=~` operator mean?**
+
+It defines a factor using the indicators on the right. In `adjust =~ motiv + harm + stabi`, the three observed scores measure Adjustment.
+
+**8. What does the `~~` operator mean?**
+
+It specifies a variance if the variable is repeated and a covariance if the variables differ. In Model 3A, `read ~~ arith` refers to what the outcomes still share after accounting for their predictors.
+
+**9. What is the difference between a regression path and a factor loading?**
+
+The reading loading tells me how closely reading reflects Achievement. The regression path from Adjustment to Achievement tells me how much Achievement is expected to differ with Adjustment, holding Risk constant.
+
+**10. What is the difference between a sample covariance matrix and a model-implied covariance matrix?**
+
+I calculate the sample matrix from the students' scores. The implied matrix comes from the model equations. A gap between the two tells me the restrictions in the model didn't reproduce some part of the sample data exactly.
+
+**11. Why does the `cov()` function produce a sample covariance matrix rather than a population covariance matrix?**
+
+`cov(dat)` only has the students in the dataset to work with. It uses their sample means and divides the cross-products by $n-1$ to estimate the population covariances.
+
+**12. What is the difference between multiple regression and multivariate regression?**
+
+Multiple regression can have several predictors for one outcome, like Model 2. Multivariate regression has several outcomes, like reading and arithmetic in Model 3A. A model can have both several predictors and several outcomes.
+
+**13. Why are some models saturated?**
+
+They have enough freely estimated parameters to reproduce every observed moment. Model 3E can reproduce all four variances and all six covariances among its four variables.
+
+**14. What does it mean when a model has zero degrees of freedom?**
+
+If the model is identified, all the available moments have been used to estimate its parameters. Model 4B is an example. Adding the last path lets it fit exactly, so there is no restriction left to test.
+
+**15. What does it mean when a model has negative degrees of freedom?**
+
+The model is trying to estimate more free parameters than there are independent pieces of information. I would need to change the specification or provide more information before interpreting estimates.
+
+**16. What is the difference between the `Γ` and `B` matrices?**
+
+In Model 6B, $\Gamma$ contains Risk → Adjustment and Risk → Achievement because Risk is exogenous. $B$ contains Adjustment → Achievement because Adjustment and Achievement are both endogenous.
+
+**17. What is a modification index?**
+
+It estimates how much chi-square would drop if I freed one fixed parameter. For the omitted `arith ~ ppsych` path, the expected drop is about 4.85.
+
+**18. Why should researchers not automatically follow modification-index recommendations?**
+
+The index doesn't tell me whether the proposed direction makes sense. Adding `motiv ~ arith` to 4A would introduce a feedback loop. I'd want evidence for that relationship beyond seeing it near the top of the output.
+
+**19. What is the difference between a direct effect and an indirect effect?**
+
+The direct effect follows the single arrow from Risk to Achievement. The indirect effect goes through Adjustment, so I multiply the slope into Adjustment by the slope from Adjustment to Achievement.
+
+**20. Which paths in the structural model are theoretically most important?**
+
+The two paths into Achievement answer the original question about student performance. If the question is whether Adjustment helps explain the relationship between Risk and Achievement, the path from Risk into Adjustment matters too.
+
+**21. How should the fit of the measurement model be evaluated?**
+
+I would start with the loadings to see whether the indicators relate to their factors in the expected direction. Then I'd check the residual variances and overall fit. Reading and spelling both load strongly on Achievement, even though the RMSEA for the full model is around .10.
+
+**22. How should the fit of the structural model be evaluated?**
+
+I would check chi-square and the fit indices together, then look at the slopes, their uncertainty, and the variance left in Achievement. Models 6A and 6B have identical fit, so deciding between their interpretations also requires a reason for the direction of the arrows.
+
+**23. What conclusions can be drawn from the standardized estimates?**
+
+At the same level of the other predictor, the expected difference in Achievement is .372 SD for a one-SD difference in Adjustment and .564 SD for a one-SD difference in Risk. The larger coefficient belongs to Risk as it was scored in this model.
+
+**24. What limitations should be considered when interpreting this SEM?**
+
+The scores alone don't establish which variable changed first. Also, the meaning of Risk depends on the indicators and their loadings. Interpreting its positive coefficient as evidence that more adversity improves achievement would read the scale backwards.
+
+# Summary of Important Lessons
+
+The name *Risk* alone would've led me to interpret the main result backwards. Checking which indicator was fixed at 1 cleared that up. I'd also check df before drawing much from the fit statistics. Model 4B looks perfect after adding one path, but that path used the only df it had left. For the indirect effect, the calculation is straightforward. The harder part is explaining why Adjustment belongs in the middle.
+
+# References
+
+UCLA Statistical Methods and Data Analytics. n.d. “Introduction to Structural Equation Modeling (SEM) in R with lavaan.” Accessed November 22, 2026. <https://stats.oarc.ucla.edu/r/seminars/rsem/>.
+
+# Appendix
+
+- GH Repo
+- Published Page
